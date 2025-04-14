@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import {
 	View,
 	Text,
@@ -13,13 +13,16 @@ import {
 } from 'react-native';
 import { useStore } from '../../store/useStore';
 import {
-	Trash2,
 	Plus,
 	FolderPlus,
 	Edit2,
 	ChevronDown,
 	ChevronRight,
 } from 'lucide-react-native';
+import { getCachedImageUri } from '../../utils/images';
+import { router } from 'expo-router';
+import Swipeable from 'react-native-gesture-handler/Swipeable'; // Import Swipeable correctly
+import { GestureHandlerRootView } from 'react-native-gesture-handler'; // Add the root view
 
 export default function WatchlistScreen() {
 	const {
@@ -116,289 +119,236 @@ export default function WatchlistScreen() {
 
 	// Prepare data for SectionList
 	const getSections = useCallback(() => {
+		// Only include groups that exist in watchlistGroups
 		return watchlistGroups
-			.filter((group) => expandedGroups[group.name])
 			.map((group) => ({
 				title: group.name,
 				data: getCurrentGroupItems(group.name),
 				itemCount: getCurrentGroupItems(group.name).length,
 				isDefault: group.name === 'default',
-			}));
+			}))
+			.filter((section) => {
+				// First filter by expanded status
+				const isExpanded = expandedGroups[section.title];
+				// Then make sure we have items to show (avoid empty sections)
+				return isExpanded !== false; // Only filter out explicitly collapsed groups
+			});
 	}, [watchlistGroups, expandedGroups, getCurrentGroupItems]);
 
-	// Render group header
-	const renderSectionHeader = useCallback(
-		({ section }) => {
+	// Add function to navigate to item details
+	const handleItemPress = (item) => {
+		router.push({
+			pathname: '/item-details',
+			params: { id: item.id, name: item.name },
+		});
+	};
+
+	// Reference for swipeables
+	const swipeableRefs = useRef({});
+
+	// Close any open swipeable when a new one is opened
+	const closeOpenSwipeable = (id) => {
+		Object.keys(swipeableRefs.current).forEach((key) => {
+			if (key !== id && swipeableRefs.current[key]) {
+				swipeableRefs.current[key].close();
+			}
+		});
+	};
+
+	const renderWatchlistItem = ({ item, index, section }) => {
+		// Get image URI for the item, or use a fallback
+		const imageUri = getCachedImageUri(item.id) || null;
+		const swipeableId = `${item.id}-${index}`;
+
+		// Create the right action component
+		const renderRightActions = () => {
 			return (
-				<View style={styles.groupContainer}>
-					<TouchableOpacity
-						style={styles.groupHeader}
-						onPress={() => toggleGroupExpand(section.title)}
-					>
-						{expandedGroups[section.title] ? (
-							<ChevronDown size={20} color='#E6B800' />
-						) : (
-							<ChevronRight size={20} color='#E6B800' />
-						)}
-						<Text style={styles.groupName}>{section.title}</Text>
-						<Text style={styles.itemCount}>{section.itemCount} items</Text>
-
-						<View style={styles.groupActions}>
-							{!section.isDefault && (
-								<>
-									<TouchableOpacity
-										style={styles.groupAction}
-										onPress={() => openRenameModal(section.title)}
-									>
-										<Edit2 size={16} color='#8F8F8F' />
-									</TouchableOpacity>
-									<TouchableOpacity
-										style={styles.groupAction}
-										onPress={() => handleDeleteGroup(section.title)}
-									>
-										<Trash2 size={16} color='#FF4444' />
-									</TouchableOpacity>
-								</>
-							)}
-						</View>
-					</TouchableOpacity>
-				</View>
+				<TouchableOpacity
+					style={styles.deleteAction}
+					onPress={() => removeFromWatchlist(item.id)}
+				>
+					<Text style={styles.deleteActionText}>Remove</Text>
+				</TouchableOpacity>
 			);
-		},
-		[expandedGroups, toggleGroupExpand, openRenameModal, handleDeleteGroup]
-	);
+		};
 
-	// Render each group title (including collapsed ones)
-	const renderAllGroupHeaders = useCallback(() => {
-		return watchlistGroups
-			.filter((group) => !expandedGroups[group.name])
-			.map((group) => {
-				const groupItems = getCurrentGroupItems(group.name);
+		return (
+			<Swipeable
+				renderRightActions={renderRightActions}
+				onSwipeableOpen={() => closeOpenSwipeable(swipeableId)}
+				ref={(ref) => {
+					if (ref) {
+						swipeableRefs.current[swipeableId] = ref;
+					}
+				}}
+			>
+				<TouchableOpacity
+					style={styles.watchlistItem}
+					onPress={() => handleItemPress(item)}
+				>
+					{imageUri ? (
+						<Image source={{ uri: imageUri }} style={styles.itemImage} />
+					) : (
+						<View style={[styles.itemImage, styles.placeholderImage]} />
+					)}
+					<View style={styles.itemDetails}>
+						<Text style={styles.itemName} numberOfLines={1}>
+							{item.name}
+						</Text>
+						<Text style={styles.itemPrice}>
+							{formatNumber(item.currentPrice)} gp
+						</Text>
+					</View>
+				</TouchableOpacity>
+			</Swipeable>
+		);
+	};
 
-				return (
-					<View key={group.name} style={styles.groupContainer}>
+	const renderSectionHeader = ({ section }) => {
+		const isDefaultGroup = section.title === 'default';
+		const displayTitle = isDefaultGroup ? 'Default Group' : section.title;
+		const isExpanded = expandedGroups[section.title] || false;
+
+		return (
+			<View style={styles.sectionHeader}>
+				<TouchableOpacity
+					style={styles.sectionTitleContainer}
+					onPress={() => toggleGroupExpand(section.title)}
+				>
+					{isExpanded ? (
+						<ChevronDown size={20} color='#E6B800' />
+					) : (
+						<ChevronRight size={20} color='#E6B800' />
+					)}
+					<Text style={styles.sectionTitle}>{displayTitle}</Text>
+					<Text style={styles.itemCount}>({section.data.length})</Text>
+				</TouchableOpacity>
+
+				{!isDefaultGroup && (
+					<View style={styles.groupActions}>
 						<TouchableOpacity
-							style={styles.groupHeader}
-							onPress={() => toggleGroupExpand(group.name)}
+							style={styles.groupActionButton}
+							onPress={() => {
+								setGroupToRename(section.title);
+								setNewName(section.title);
+								setRenameModalVisible(true);
+							}}
 						>
-							<ChevronRight size={20} color='#E6B800' />
-							<Text style={styles.groupName}>{group.name}</Text>
-							<Text style={styles.itemCount}>{groupItems.length} items</Text>
-
-							<View style={styles.groupActions}>
-								{group.name !== 'default' && (
-									<>
-										<TouchableOpacity
-											style={styles.groupAction}
-											onPress={() => openRenameModal(group.name)}
-										>
-											<Edit2 size={16} color='#8F8F8F' />
-										</TouchableOpacity>
-										<TouchableOpacity
-											style={styles.groupAction}
-											onPress={() => handleDeleteGroup(group.name)}
-										>
-											<Trash2 size={16} color='#FF4444' />
-										</TouchableOpacity>
-									</>
-								)}
-							</View>
+							<Edit2 size={16} color='#FFFFFF' />
 						</TouchableOpacity>
 					</View>
-				);
-			});
-	}, [
-		watchlistGroups,
-		expandedGroups,
-		getCurrentGroupItems,
-		toggleGroupExpand,
-	]);
-
-	// Render each item
-	const renderItem = useCallback(
-		({ item, section }) => {
-			return (
-				<View style={styles.card}>
-					<View style={styles.cardHeader}>
-						<Image
-							source={{
-								uri: `https://secure.runescape.com/m=itemdb_oldschool/obj_big.gif?id=${item.id}`,
-							}}
-							style={styles.itemImage}
-						/>
-						<View style={styles.nameContainer}>
-							<Text style={styles.itemName}>{item.name}</Text>
-						</View>
-						<View style={styles.actionButtons}>
-							{watchlistGroups.length > 1 && (
-								<TouchableOpacity
-									style={styles.moveButton}
-									onPress={() => {
-										// Show dropdown to select group
-										Alert.alert(
-											'Move Item',
-											'Select destination group',
-											watchlistGroups
-												.filter((g) => g.name !== section.title)
-												.map((g) => ({
-													text: g.name,
-													onPress: () => moveItemToGroup(item.id, g.name),
-												}))
-												.concat([
-													{
-														text: 'Cancel',
-														style: 'cancel',
-													},
-												])
-										);
-									}}
-								>
-									<Text style={styles.moveButtonText}>Move</Text>
-								</TouchableOpacity>
-							)}
-							<TouchableOpacity
-								style={styles.removeButton}
-								onPress={() => removeFromWatchlist(item.id)}
-							>
-								<Trash2 size={20} color='#FF4444' />
-							</TouchableOpacity>
-						</View>
-					</View>
-
-					<View style={styles.cardContent}>
-						<View style={styles.priceContainer}>
-							<Text style={styles.priceLabel}>Current Price</Text>
-							<Text style={styles.priceValue}>
-								{formatNumber(item.currentPrice)}
-							</Text>
-						</View>
-					</View>
-				</View>
-			);
-		},
-		[watchlistGroups, moveItemToGroup, removeFromWatchlist]
-	);
-
-	const renderEmptyList = useCallback(() => {
-		return (
-			<View style={styles.emptyContainer}>
-				<Text style={styles.emptyText}>No items in your watchlist</Text>
-				<Text style={styles.emptySubtext}>
-					Add items by searching or from the All Items screen
-				</Text>
+				)}
 			</View>
 		);
-	}, []);
+	};
 
-	const renderEmptySection = useCallback(() => {
-		return (
-			<View style={styles.emptyGroupContainer}>
-				<Text style={styles.emptyGroupText}>No items in this group</Text>
-			</View>
-		);
-	}, []);
+	// Create a simple separator component
+	const ItemSeparator = () => <View style={{ height: 1 }} />;
 
 	return (
-		<View style={styles.container}>
-			<View style={styles.titleContainer}>
-				<Text style={styles.title}>Your Watchlist</Text>
-				<TouchableOpacity
-					style={styles.addGroupButton}
-					onPress={() => setShowNewGroupModal(true)}
+		<GestureHandlerRootView style={{ flex: 1 }}>
+			<View style={styles.container}>
+				{watchlist.length === 0 ? (
+					<View style={styles.emptyContainer}>
+						<Text style={styles.emptyText}>No items in your watchlist</Text>
+						<Text style={styles.emptySubtext}>
+							Add items by searching or from the All Items screen
+						</Text>
+					</View>
+				) : (
+					<View style={styles.content}>
+						<SectionList
+							sections={getSections()}
+							keyExtractor={(item, index) => `${item.id}-${index}`}
+							renderItem={renderWatchlistItem}
+							renderSectionHeader={renderSectionHeader}
+							stickySectionHeadersEnabled={false}
+							style={styles.sectionList}
+							ItemSeparatorComponent={null} // Remove custom separator
+							ListFooterComponent={
+								<TouchableOpacity
+									style={styles.addGroupButton}
+									onPress={() => setShowNewGroupModal(true)}
+								>
+									<FolderPlus size={16} color='#FFFFFF' />
+									<Text style={styles.addGroupText}>Add New Group</Text>
+								</TouchableOpacity>
+							}
+						/>
+					</View>
+				)}
+
+				{/* New Group Modal */}
+				<Modal
+					visible={showNewGroupModal}
+					transparent={true}
+					animationType='slide'
+					onRequestClose={() => setShowNewGroupModal(false)}
 				>
-					<FolderPlus size={20} color='#E6B800' />
-				</TouchableOpacity>
+					<View style={styles.modalOverlay}>
+						<View style={styles.modalContent}>
+							<Text style={styles.modalTitle}>Create New Group</Text>
+							<TextInput
+								style={styles.input}
+								placeholder='Group Name'
+								placeholderTextColor='#8F8F8F'
+								value={newGroupName}
+								onChangeText={setNewGroupName}
+							/>
+							<View style={styles.modalButtons}>
+								<TouchableOpacity
+									style={[styles.modalButton, styles.cancelButton]}
+									onPress={() => setShowNewGroupModal(false)}
+								>
+									<Text style={styles.buttonText}>Cancel</Text>
+								</TouchableOpacity>
+								<TouchableOpacity
+									style={[styles.modalButton, styles.createButton]}
+									onPress={handleAddNewGroup}
+								>
+									<Text style={styles.buttonText}>Create</Text>
+								</TouchableOpacity>
+							</View>
+						</View>
+					</View>
+				</Modal>
+
+				{/* Rename Group Modal */}
+				<Modal
+					visible={renameModalVisible}
+					transparent={true}
+					animationType='slide'
+					onRequestClose={() => setRenameModalVisible(false)}
+				>
+					<View style={styles.modalOverlay}>
+						<View style={styles.modalContent}>
+							<Text style={styles.modalTitle}>Rename Group</Text>
+							<TextInput
+								style={styles.input}
+								placeholder='New Group Name'
+								placeholderTextColor='#8F8F8F'
+								value={newName}
+								onChangeText={setNewName}
+							/>
+							<View style={styles.modalButtons}>
+								<TouchableOpacity
+									style={[styles.modalButton, styles.cancelButton]}
+									onPress={() => setRenameModalVisible(false)}
+								>
+									<Text style={styles.buttonText}>Cancel</Text>
+								</TouchableOpacity>
+								<TouchableOpacity
+									style={[styles.modalButton, styles.createButton]}
+									onPress={handleRenameGroup}
+								>
+									<Text style={styles.buttonText}>Rename</Text>
+								</TouchableOpacity>
+							</View>
+						</View>
+					</View>
+				</Modal>
 			</View>
-
-			{watchlist.length === 0 ? (
-				renderEmptyList()
-			) : (
-				<>
-					{renderAllGroupHeaders()}
-					<SectionList
-						sections={getSections()}
-						keyExtractor={(item) => item.id.toString()}
-						renderItem={renderItem}
-						renderSectionHeader={renderSectionHeader}
-						renderSectionFooter={(section) =>
-							section.section.data.length === 0 ? renderEmptySection() : null
-						}
-						stickySectionHeadersEnabled={false}
-						style={styles.sectionList}
-					/>
-				</>
-			)}
-
-			{/* New Group Modal */}
-			<Modal
-				visible={showNewGroupModal}
-				transparent={true}
-				animationType='slide'
-				onRequestClose={() => setShowNewGroupModal(false)}
-			>
-				<View style={styles.modalOverlay}>
-					<View style={styles.modalContent}>
-						<Text style={styles.modalTitle}>Create New Group</Text>
-						<TextInput
-							style={styles.input}
-							placeholder='Group Name'
-							placeholderTextColor='#8F8F8F'
-							value={newGroupName}
-							onChangeText={setNewGroupName}
-						/>
-						<View style={styles.modalButtons}>
-							<TouchableOpacity
-								style={[styles.modalButton, styles.cancelButton]}
-								onPress={() => setShowNewGroupModal(false)}
-							>
-								<Text style={styles.buttonText}>Cancel</Text>
-							</TouchableOpacity>
-							<TouchableOpacity
-								style={[styles.modalButton, styles.createButton]}
-								onPress={handleAddNewGroup}
-							>
-								<Text style={styles.buttonText}>Create</Text>
-							</TouchableOpacity>
-						</View>
-					</View>
-				</View>
-			</Modal>
-
-			{/* Rename Group Modal */}
-			<Modal
-				visible={renameModalVisible}
-				transparent={true}
-				animationType='slide'
-				onRequestClose={() => setRenameModalVisible(false)}
-			>
-				<View style={styles.modalOverlay}>
-					<View style={styles.modalContent}>
-						<Text style={styles.modalTitle}>Rename Group</Text>
-						<TextInput
-							style={styles.input}
-							placeholder='New Group Name'
-							placeholderTextColor='#8F8F8F'
-							value={newName}
-							onChangeText={setNewName}
-						/>
-						<View style={styles.modalButtons}>
-							<TouchableOpacity
-								style={[styles.modalButton, styles.cancelButton]}
-								onPress={() => setRenameModalVisible(false)}
-							>
-								<Text style={styles.buttonText}>Cancel</Text>
-							</TouchableOpacity>
-							<TouchableOpacity
-								style={[styles.modalButton, styles.createButton]}
-								onPress={handleRenameGroup}
-							>
-								<Text style={styles.buttonText}>Rename</Text>
-							</TouchableOpacity>
-						</View>
-					</View>
-				</View>
-			</Modal>
-		</View>
+		</GestureHandlerRootView>
 	);
 }
 
@@ -421,131 +371,63 @@ const styles = StyleSheet.create({
 		fontSize: 16,
 		textAlign: 'center',
 	},
-	emptyGroupContainer: {
-		alignItems: 'center',
-		padding: 20,
-	},
-	emptyGroupText: {
-		color: '#8F8F8F',
-		fontSize: 14,
-	},
 	container: {
 		flex: 1,
 		backgroundColor: '#1A1A1A',
 		padding: 16,
 	},
-	titleContainer: {
+	watchlistItem: {
+		flexDirection: 'row',
+		alignItems: 'center',
+		backgroundColor: '#2D2D2D',
+		borderRadius: 8,
+		padding: 12,
+		marginVertical: 6,
+	},
+	deleteAction: {
+		backgroundColor: '#FF4444',
+		justifyContent: 'center',
+		alignItems: 'center',
+		width: 80,
+		borderTopRightRadius: 8,
+		borderBottomRightRadius: 8,
+		marginVertical: 6,
+	},
+	deleteActionText: {
+		color: 'white',
+		fontWeight: 'bold',
+		padding: 10,
+	},
+	sectionHeader: {
 		flexDirection: 'row',
 		justifyContent: 'space-between',
 		alignItems: 'center',
-		marginBottom: 16,
+		paddingVertical: 12,
+		marginTop: 8,
+		borderBottomWidth: 1,
+		borderBottomColor: '#2D2D2D',
 	},
-	title: {
-		color: '#E6B800',
-		fontSize: 24,
-		fontWeight: 'bold',
-	},
-	addGroupButton: {
-		backgroundColor: '#2D2D2D',
-		padding: 8,
-		borderRadius: 8,
-	},
-	groupContainer: {
-		marginBottom: 12,
-		backgroundColor: '#2D2D2D',
-		borderRadius: 8,
-		overflow: 'hidden',
-	},
-	groupHeader: {
+	sectionTitleContainer: {
 		flexDirection: 'row',
 		alignItems: 'center',
-		padding: 12,
-		backgroundColor: '#3D3D3D',
 	},
-	groupName: {
+	sectionTitle: {
 		color: '#E6B800',
 		fontSize: 16,
 		fontWeight: 'bold',
 		marginLeft: 8,
-		flex: 1,
 	},
 	itemCount: {
 		color: '#8F8F8F',
 		fontSize: 14,
-		marginRight: 8,
+		marginLeft: 4,
 	},
 	groupActions: {
 		flexDirection: 'row',
 	},
-	groupAction: {
+	groupActionButton: {
 		padding: 8,
 		marginLeft: 4,
-	},
-	card: {
-		backgroundColor: '#2D2D2D',
-		padding: 12,
-		borderBottomWidth: 1,
-		borderBottomColor: '#3D3D3D',
-	},
-	cardHeader: {
-		flexDirection: 'row',
-		alignItems: 'center',
-		marginBottom: 12,
-	},
-	nameContainer: {
-		flex: 1,
-		marginLeft: 12,
-	},
-	itemImage: {
-		width: 40,
-		height: 40,
-		borderRadius: 8,
-		backgroundColor: '#3D3D3D',
-	},
-	itemName: {
-		color: '#FFFFFF',
-		fontSize: 16,
-		fontWeight: 'bold',
-	},
-	actionButtons: {
-		flexDirection: 'row',
-		alignItems: 'center',
-	},
-	moveButton: {
-		paddingHorizontal: 8,
-		paddingVertical: 4,
-		borderRadius: 4,
-		backgroundColor: '#3D3D3D',
-		marginRight: 8,
-	},
-	moveButtonText: {
-		color: '#E6B800',
-		fontSize: 12,
-	},
-	removeButton: {
-		padding: 8,
-	},
-	cardContent: {
-		flexDirection: 'row',
-		justifyContent: 'center',
-		paddingVertical: 12,
-		borderTopWidth: 1,
-		borderBottomWidth: 1,
-		borderTopColor: '#3D3D3D',
-		borderBottomColor: '#3D3D3D',
-	},
-	priceContainer: {
-		alignItems: 'center',
-	},
-	priceLabel: {
-		color: '#8F8F8F',
-		fontSize: 14,
-		marginBottom: 4,
-	},
-	priceValue: {
-		color: '#E6B800',
-		fontSize: 20,
-		fontWeight: 'bold',
 	},
 	modalOverlay: {
 		flex: 1,
@@ -594,5 +476,43 @@ const styles = StyleSheet.create({
 	buttonText: {
 		fontWeight: 'bold',
 		color: '#1A1A1A',
+	},
+	itemImage: {
+		width: 40,
+		height: 40,
+		borderRadius: 4,
+		marginRight: 10,
+	},
+	placeholderImage: {
+		backgroundColor: '#3D3D3D',
+	},
+	content: {
+		flex: 1,
+	},
+	addGroupButton: {
+		flexDirection: 'row',
+		alignItems: 'center',
+		justifyContent: 'center',
+		backgroundColor: '#2D2D2D',
+		borderRadius: 8,
+		padding: 12,
+		marginVertical: 16,
+	},
+	addGroupText: {
+		color: '#FFFFFF',
+		marginLeft: 8,
+		fontSize: 16,
+	},
+	itemDetails: {
+		flex: 1,
+	},
+	itemName: {
+		color: '#FFFFFF',
+		fontSize: 16,
+		marginBottom: 4,
+	},
+	itemPrice: {
+		color: '#E6B800',
+		fontSize: 14,
 	},
 });

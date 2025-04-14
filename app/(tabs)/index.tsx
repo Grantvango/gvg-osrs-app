@@ -354,6 +354,77 @@ export default function IndexScreen() {
 		router.push('/search');
 	};
 
+	const handleItemPress = (item: ItemInfo) => {
+		router.push({
+			pathname: '/item-details',
+			params: { id: item.id, name: item.name },
+		});
+	};
+
+	const renderItem = ({ item }: { item: ItemInfo }) => (
+		<TouchableOpacity style={styles.card} onPress={() => handleItemPress(item)}>
+			<View style={styles.cardHeader}>
+				<Image source={{ uri: item.image }} style={styles.itemImage} />
+				<View style={styles.nameContainer}>
+					<Text style={styles.itemName}>{item.name}</Text>
+					{item.members && <Text style={styles.memberBadge}>P2P</Text>}
+				</View>
+				<TouchableOpacity
+					style={styles.favoriteButton}
+					onPress={() => handleAddToWatchlist(item)}
+				>
+					<Heart
+						size={20}
+						color={isInWatchlist(parseInt(item.id)) ? '#FF4444' : '#E6B800'}
+						fill={isInWatchlist(parseInt(item.id)) ? '#FF4444' : 'transparent'}
+					/>
+				</TouchableOpacity>
+			</View>
+
+			<View style={styles.cardContent}>
+				<View style={styles.priceContainer}>
+					<Text style={styles.priceLabel}>Buy</Text>
+					<Text style={styles.priceValue}>{formatNumber(item.buyPrice)}</Text>
+				</View>
+				<View style={styles.priceContainer}>
+					<Text style={styles.priceLabel}>Sell</Text>
+					<Text style={styles.priceValue}>{formatNumber(item.sellPrice)}</Text>
+				</View>
+				<View style={styles.marginContainer}>
+					<Text style={styles.priceLabel}>Margin</Text>
+					<View style={styles.marginValueContainer}>
+						{item.margin > 0 ? (
+							<TrendingUp size={16} color='#4CAF50' />
+						) : (
+							<TrendingDown size={16} color='#FF4444' />
+						)}
+						<Text
+							style={[
+								styles.marginValue,
+								item.margin > 0 ? styles.positive : styles.negative,
+							]}
+						>
+							{formatNumber(item.margin)}
+						</Text>
+					</View>
+				</View>
+			</View>
+
+			<View style={styles.cardFooter}>
+				<Text style={styles.footerItem}>
+					Buy Limit:{' '}
+					<Text style={styles.footerValue}>{formatNumber(item.buyLimit)}</Text>
+				</Text>
+				<Text style={styles.footerItem}>
+					Profit:{' '}
+					<Text style={styles.footerValue}>
+						{formatNumber(item.potentialProfit)}
+					</Text>
+				</Text>
+			</View>
+		</TouchableOpacity>
+	);
+
 	const formatNumber = (num: number) => num.toLocaleString();
 
 	if (loading && !refreshing && displayedItems.length === 0) {
@@ -368,7 +439,6 @@ export default function IndexScreen() {
 	return (
 		<View style={styles.container}>
 			<View style={styles.header}>
-				<Text style={styles.title}>All Items</Text>
 				<TouchableOpacity
 					style={styles.searchButton}
 					onPress={handleSearchPress}
@@ -380,79 +450,7 @@ export default function IndexScreen() {
 			<FlatList
 				data={displayedItems}
 				keyExtractor={(item) => item.id}
-				renderItem={({ item }) => (
-					<View style={styles.card}>
-						<View style={styles.cardHeader}>
-							<Image source={{ uri: item.image }} style={styles.itemImage} />
-							<View style={styles.nameContainer}>
-								<Text style={styles.itemName}>{item.name}</Text>
-								{item.members && <Text style={styles.memberBadge}>P2P</Text>}
-							</View>
-							<TouchableOpacity
-								style={styles.favoriteButton}
-								onPress={() => handleAddToWatchlist(item)}
-							>
-								<Heart
-									size={20}
-									color={
-										isInWatchlist(parseInt(item.id)) ? '#FF4444' : '#E6B800'
-									}
-									fill={
-										isInWatchlist(parseInt(item.id)) ? '#FF4444' : 'transparent'
-									}
-								/>
-							</TouchableOpacity>
-						</View>
-
-						<View style={styles.cardContent}>
-							<View style={styles.priceContainer}>
-								<Text style={styles.priceLabel}>Buy</Text>
-								<Text style={styles.priceValue}>
-									{formatNumber(item.buyPrice)}
-								</Text>
-							</View>
-							<View style={styles.priceContainer}>
-								<Text style={styles.priceLabel}>Sell</Text>
-								<Text style={styles.priceValue}>
-									{formatNumber(item.sellPrice)}
-								</Text>
-							</View>
-							<View style={styles.marginContainer}>
-								<Text style={styles.priceLabel}>Margin</Text>
-								<View style={styles.marginValueContainer}>
-									{item.margin > 0 ? (
-										<TrendingUp size={16} color='#4CAF50' />
-									) : (
-										<TrendingDown size={16} color='#FF4444' />
-									)}
-									<Text
-										style={[
-											styles.marginValue,
-											item.margin > 0 ? styles.positive : styles.negative,
-										]}
-									>
-										{formatNumber(item.margin)}
-									</Text>
-								</View>
-							</View>
-						</View>
-
-						<View style={styles.cardFooter}>
-							<Text style={styles.footerItem}>
-								Buy Limit:{' '}
-								<Text style={styles.footerValue}>
-									{formatNumber(item.buyLimit)}
-								</Text>
-							</Text>
-							<Text style={styles.footerItem}>
-								Profit:{' '}
-								<Text style={styles.footerValue}>
-									{formatNumber(item.potentialProfit)}
-								</Text>
-							</Text>
-						</View>
-					</View>
-				)}
+				renderItem={renderItem}
 				refreshControl={
 					<RefreshControl
 						refreshing={refreshing}

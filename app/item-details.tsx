@@ -49,6 +49,12 @@ const CACHE_EXPIRY = {
 type TimePeriod = '1D' | '7D' | '30D' | '1Y';
 const TIME_PERIODS: TimePeriod[] = ['1D', '7D', '30D', '1Y'];
 
+// Adding volume chart colors to match the screenshot
+const VOLUME_COLORS = {
+	HIGH: 'rgba(230, 184, 0, 1)', // Orange/gold for high volume (buy)
+	LOW: 'rgba(46, 204, 113, 1)', // Green for low volume (sell)
+};
+
 export default function ItemDetailScreen() {
 	const { id, name } = useLocalSearchParams();
 	const itemId = typeof id === 'string' ? id : '';
@@ -115,6 +121,29 @@ export default function ItemDetailScreen() {
 	useEffect(() => {
 		loadItemData(selectedPeriod);
 	}, [itemId, selectedPeriod]);
+
+	// Add this function if it's not already in your code:
+	const loadItemImage = async (itemId: string) => {
+		try {
+			const imageUri = await getCachedImageUri(itemId);
+			return imageUri;
+		} catch (error) {
+			console.error('Error loading image:', error);
+			return `https://secure.runescape.com/m=itemdb_oldschool/obj_big.gif?id=${itemId}`;
+		}
+	};
+
+	// Inside your component, update image handling:
+	useEffect(() => {
+		if (itemDetails && itemId) {
+			loadItemImage(itemId).then((imageUri) => {
+				setItemDetails((prev: any) => ({
+					...prev,
+					imageUri,
+				}));
+			});
+		}
+	}, [itemId, itemDetails]);
 
 	// Function to create PanResponder for any chart
 	const createPanResponder = (isVolumeChart = false) => {
@@ -184,8 +213,8 @@ export default function ItemDetailScreen() {
 				date: dateLabel,
 			},
 			volumeData: {
-				high: rawData.highPriceVolume || 0,
-				low: rawData.lowPriceVolume || 0,
+				high: Math.abs(rawData.highPriceVolume || 0),
+				low: Math.abs(rawData.lowPriceVolume || 0),
 			},
 		});
 	};
@@ -355,13 +384,15 @@ export default function ItemDetailScreen() {
 				datasets: [
 					{
 						data: highVolumes, // Positive values
+						color: () => VOLUME_COLORS.HIGH,
 					},
 					{
 						data: lowVolumes, // Negative values
+						color: () => VOLUME_COLORS.LOW,
 					},
 				],
 				// Additional properties for the bar chart
-				barColors: ['rgba(230, 184, 0, 1)', 'rgba(100, 180, 255, 1)'],
+				barColors: [VOLUME_COLORS.HIGH, VOLUME_COLORS.LOW],
 				legend: ['High Volume', 'Low Volume'],
 				rawData: filteredTimeseriesData,
 			};
@@ -547,11 +578,20 @@ export default function ItemDetailScreen() {
 
 	const volumeChartConfig = {
 		...chartConfig,
+		backgroundColor: '#2D2D2D',
+		backgroundGradientFrom: '#2D2D2D',
+		backgroundGradientTo: '#3D3D3D',
 		color: (opacity = 1) => `rgba(255, 255, 255, ${opacity})`,
 		formatYLabel: (value: string) => {
 			const num = parseInt(value);
-			return formatValueWithSuffix(num);
+			return formatValueWithSuffix(Math.abs(num)); // Showing absolute values on y-axis
 		},
+		propsForBackgroundLines: {
+			strokeDasharray: '',
+			stroke: 'rgba(255, 255, 255, 0.1)',
+		},
+		barPercentage: 0.8,
+		decimalPlaces: 0,
 	};
 
 	// Function to handle chart layout for proper dimensions
@@ -734,7 +774,7 @@ export default function ItemDetailScreen() {
 						chartConfig={volumeChartConfig}
 						style={styles.chart}
 						withHorizontalLabels={true}
-						fromZero={true}
+						fromZero={false} // Set to false to allow negative values
 						showBarTops={false}
 						segments={4}
 						yAxisInterval={4}
@@ -767,7 +807,7 @@ export default function ItemDetailScreen() {
 										: linePosition.x + 10
 								}
 								y={20}
-								fill='#E6B800'
+								fill={VOLUME_COLORS.HIGH}
 								fontSize='12'
 								fontWeight='bold'
 							>
@@ -780,11 +820,11 @@ export default function ItemDetailScreen() {
 										: linePosition.x + 10
 								}
 								y={40}
-								fill='#64B4FF'
+								fill={VOLUME_COLORS.LOW}
 								fontSize='12'
 								fontWeight='bold'
 							>
-								Low Vol: {formatNumber(linePosition.volumeData.low)}
+								Low Vol: {formatNumber(Math.abs(linePosition.volumeData.low))}
 							</SvgText>
 						</Svg>
 					)}
@@ -972,15 +1012,21 @@ export default function ItemDetailScreen() {
 					<View style={styles.chartLegend}>
 						<View style={styles.legendItem}>
 							<View
-								style={[styles.legendColor, { backgroundColor: '#E6B800' }]}
+								style={[
+									styles.legendColor,
+									{ backgroundColor: VOLUME_COLORS.HIGH },
+								]}
 							/>
-							<Text style={styles.legendText}>High Volume (Up)</Text>
+							<Text style={styles.legendText}>High Volume</Text>
 						</View>
 						<View style={styles.legendItem}>
 							<View
-								style={[styles.legendColor, { backgroundColor: '#64B4FF' }]}
+								style={[
+									styles.legendColor,
+									{ backgroundColor: VOLUME_COLORS.LOW },
+								]}
 							/>
-							<Text style={styles.legendText}>Low Volume (Down)</Text>
+							<Text style={styles.legendText}>Low Volume</Text>
 						</View>
 					</View>
 
@@ -1120,15 +1166,21 @@ export default function ItemDetailScreen() {
 					<View style={styles.chartLegend}>
 						<View style={styles.legendItem}>
 							<View
-								style={[styles.legendColor, { backgroundColor: '#E6B800' }]}
+								style={[
+									styles.legendColor,
+									{ backgroundColor: VOLUME_COLORS.HIGH },
+								]}
 							/>
-							<Text style={styles.legendText}>High Volume (Up)</Text>
+							<Text style={styles.legendText}>High Volume</Text>
 						</View>
 						<View style={styles.legendItem}>
 							<View
-								style={[styles.legendColor, { backgroundColor: '#64B4FF' }]}
+								style={[
+									styles.legendColor,
+									{ backgroundColor: VOLUME_COLORS.LOW },
+								]}
 							/>
-							<Text style={styles.legendText}>Low Volume (Down)</Text>
+							<Text style={styles.legendText}>Low Volume</Text>
 						</View>
 					</View>
 

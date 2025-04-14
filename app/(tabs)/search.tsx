@@ -156,8 +156,6 @@ export default function SearchScreen() {
 
 	return (
 		<View style={styles.container}>
-			<Text style={styles.title}>Search Items</Text>
-
 			<View style={styles.searchContainer}>
 				<SearchIcon size={20} color='#8F8F8F' style={styles.searchIcon} />
 				<TextInput
@@ -252,12 +250,6 @@ const styles = StyleSheet.create({
 		flex: 1,
 		backgroundColor: '#1A1A1A',
 		padding: 16,
-	},
-	title: {
-		color: '#E6B800',
-		fontSize: 24,
-		fontWeight: 'bold',
-		marginBottom: 16,
 	},
 	searchContainer: {
 		flexDirection: 'row',
