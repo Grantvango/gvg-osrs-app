@@ -49,10 +49,22 @@ const CACHE_EXPIRY = {
 type TimePeriod = '1D' | '7D' | '30D' | '1Y';
 const TIME_PERIODS: TimePeriod[] = ['1D', '7D', '30D', '1Y'];
 
-// Adding volume chart colors to match the screenshot
+// Chart color scheme to match the photo
+const CHART_COLORS = {
+	PRIMARY: 'rgba(220, 38, 38, 1)', // Red color for main chart line
+	SECONDARY: 'rgba(180, 180, 180, 0.5)', // Light gray for secondary data
+	GRID: 'rgba(70, 70, 70, 0.5)', // Dark gray for grid lines
+	BACKGROUND_DARK: '#000000', // Pure black background
+	BACKGROUND_LIGHT: '#1a1a1a', // Slightly lighter black for contrast
+	TEXT: '#FFFFFF', // White text
+	ACCENT: '#E6B800', // Keep gold accent for highlights
+	TOOLTIP_BG: 'rgba(30, 30, 30, 0.85)', // Dark tooltip background
+};
+
+// Adding volume chart colors
 const VOLUME_COLORS = {
-	HIGH: 'rgba(230, 184, 0, 1)', // Orange/gold for high volume (buy)
-	LOW: 'rgba(46, 204, 113, 1)', // Green for low volume (sell)
+	HIGH: CHART_COLORS.PRIMARY, // Red for high volume (matching chart)
+	LOW: 'rgba(46, 204, 113, 1)', // Keep green for low volume
 };
 
 export default function ItemDetailScreen() {
@@ -223,15 +235,35 @@ export default function ItemDetailScreen() {
 	const getTimeseriesParams = (period: TimePeriod) => {
 		switch (period) {
 			case '1D':
-				return { timestep: '5m', timeFilter: 24 * 60 * 60 }; // 24 hours, 5-min intervals
+				return {
+					timestep: '5m',
+					timeFilter: 24 * 60 * 60, // 24 hours in seconds
+					maxDataPoints: 288, // 24 hours * 12 data points per hour (5-min intervals)
+				};
 			case '7D':
-				return { timestep: '1h', timeFilter: 7 * 24 * 60 * 60 }; // 7 days, 1-hour intervals
+				return {
+					timestep: '1h',
+					timeFilter: 7 * 24 * 60 * 60,
+					maxDataPoints: 168, // 7 days * 24 hours
+				};
 			case '30D':
-				return { timestep: '6h', timeFilter: 30 * 24 * 60 * 60 }; // 30 days, 6-hour intervals
+				return {
+					timestep: '6h',
+					timeFilter: 30 * 24 * 60 * 60,
+					maxDataPoints: 120, // 30 days * 4 data points per day (6-hour intervals)
+				};
 			case '1Y':
-				return { timestep: '24h', timeFilter: 365 * 24 * 60 * 60 }; // 1 year, 24-hour intervals
+				return {
+					timestep: '24h',
+					timeFilter: 365 * 24 * 60 * 60,
+					maxDataPoints: 365, // 365 days (1 per day)
+				};
 			default:
-				return { timestep: '5m', timeFilter: 24 * 60 * 60 }; // Default to 1D
+				return {
+					timestep: '5m',
+					timeFilter: 24 * 60 * 60,
+					maxDataPoints: 288,
+				};
 		}
 	};
 
@@ -244,7 +276,8 @@ export default function ItemDetailScreen() {
 
 		try {
 			// Get appropriate parameters for the selected time period
-			const { timestep, timeFilter } = getTimeseriesParams(period);
+			const { timestep, timeFilter, maxDataPoints } =
+				getTimeseriesParams(period);
 			const timeseriesCacheKey = `${CACHE_TIMESERIES_PREFIX}${itemId}_${period}`;
 
 			// Try to load data from cache first
@@ -286,11 +319,24 @@ export default function ItemDetailScreen() {
 			// Filter timeseries data based on the selected period if needed
 			let filteredTimeseriesData = timeseriesData?.data || [];
 
-			if (timeFilter && filteredTimeseriesData.length > 0) {
-				const now = Math.floor(Date.now() / 1000);
-				filteredTimeseriesData = filteredTimeseriesData.filter(
-					(entry: any) => entry.timestamp >= now - timeFilter
+			if (filteredTimeseriesData.length > 0) {
+				// First sort by timestamp to ensure newest data is at the end
+				filteredTimeseriesData.sort(
+					(a: any, b: any) => a.timestamp - b.timestamp
 				);
+
+				// If we have more data points than needed, take only the most recent ones
+				if (filteredTimeseriesData.length > maxDataPoints) {
+					filteredTimeseriesData = filteredTimeseriesData.slice(-maxDataPoints);
+				}
+
+				// Apply time filter if needed (ensures data is within the right time window)
+				if (timeFilter) {
+					const now = Math.floor(Date.now() / 1000);
+					filteredTimeseriesData = filteredTimeseriesData.filter(
+						(entry: any) => entry.timestamp >= now - timeFilter
+					);
+				}
 			}
 
 			// Organize timeseries data
@@ -299,21 +345,21 @@ export default function ItemDetailScreen() {
 			);
 
 			// Filter out null/zero values for high and low prices
-			const highPrices = filteredTimeseriesData.map(
-				(entry: any, index: number) => {
+			const highPrices = filteredTimeseriesData
+				.map((entry: any, index: number) => {
 					const price = entry.avgHighPrice;
-					// If price is null/undefined/0, return null so it won't be plotted
+					// Filter out all null, undefined, 0 values
 					return price && price > 0 ? price : null;
-				}
-			);
+				})
+				.filter(Boolean); // Remove null/undefined values completely
 
-			const lowPrices = filteredTimeseriesData.map(
-				(entry: any, index: number) => {
+			const lowPrices = filteredTimeseriesData
+				.map((entry: any, index: number) => {
 					const price = entry.avgLowPrice;
-					// If price is null/undefined/0, return null so it won't be plotted
+					// Filter out all null, undefined, 0 values
 					return price && price > 0 ? price : null;
-				}
-			);
+				})
+				.filter(Boolean); // Remove null/undefined values completely
 
 			// Extract high and low volume data for bar chart
 			const highVolumes = filteredTimeseriesData.map((entry: any) =>
@@ -360,21 +406,32 @@ export default function ItemDetailScreen() {
 				labels,
 				datasets: [
 					{
-						data: highPrices.some((p) => p !== null) ? highPrices : [0],
-						color: (opacity = 1) => `rgba(230, 184, 0, ${opacity})`,
-						strokeWidth: 2,
+						data: highPrices.length > 0 ? highPrices : [], // Use empty array instead of [0]
+						color: (opacity = 5) => CHART_COLORS.PRIMARY,
+						strokeWidth: 1,
 						label: 'High Price',
+						// Use this function to draw discontinuous lines
+						withDots: false,
+						// Skip rendering the line segment for null/undefined points
+						renderDotContent: ({ x, y, index, indexData }: any) => {
+							return null; // Don't render any dots
+						},
 					},
 					{
-						data: lowPrices.some((p) => p !== null) ? lowPrices : [0],
-						color: (opacity = 1) => `rgba(100, 180, 255, ${opacity})`,
-						strokeWidth: 2,
+						data: lowPrices.length > 0 ? lowPrices : [], // Use empty array instead of [0]
+						color: (opacity = 5) => 'rgba(46, 204, 113, 1)', // Green for low prices
+						strokeWidth: 1.5,
 						label: 'Low Price',
+						withDots: false,
+						// Skip rendering the line segment for null/undefined points
+						renderDotContent: ({ x, y, index, indexData }: any) => {
+							return null; // Don't render any dots
+						},
 					},
 				],
 				legend: ['High Price', 'Low Price'],
-				rawData: filteredTimeseriesData, // Store raw data for tooltips
-				timestamps: timestamps, // Store timestamps for tooltips
+				rawData: filteredTimeseriesData,
+				timestamps: timestamps,
 			};
 
 			// Format the volume chart data for bar chart
@@ -546,19 +603,20 @@ export default function ItemDetailScreen() {
 		setFullscreenVolumeChart(!fullscreenVolumeChart);
 	};
 
+	// Update the chart configuration to match the photo style
 	const chartConfig = {
-		backgroundColor: '#2D2D2D',
-		backgroundGradientFrom: '#2D2D2D',
-		backgroundGradientTo: '#3D3D3D',
-		decimalPlaces: 0,
+		backgroundColor: CHART_COLORS.BACKGROUND_DARK,
+		backgroundGradientFrom: CHART_COLORS.BACKGROUND_DARK,
+		backgroundGradientTo: CHART_COLORS.BACKGROUND_DARK,
+		decimalPlaces: 1,
 		color: (opacity = 1) => `rgba(255, 255, 255, ${opacity})`,
-		labelColor: (opacity = 1) => `rgba(255, 255, 255, ${opacity})`,
+		labelColor: (opacity = 1) => `rgba(255, 255, 255, ${opacity * 0.8})`,
 		style: {
-			borderRadius: 8,
+			borderRadius: 0, // Remove border radius for cleaner look
 		},
 		propsForDots: {
-			r: '2',
-			strokeWidth: '1',
+			r: '0', // No dots
+			strokeWidth: '0',
 		},
 		propsForLabels: {
 			fontSize: 10,
@@ -569,41 +627,12 @@ export default function ItemDetailScreen() {
 		},
 		propsForBackgroundLines: {
 			strokeDasharray: '',
-			stroke: 'rgba(255, 255, 255, 0.1)',
+			stroke: CHART_COLORS.GRID,
+			strokeWidth: '0.5',
 		},
-		useShadowColorFromDataset: false,
-		fillShadowGradient: 'rgba(0, 0, 0, 0)', // Disable fill shadow
-		fillShadowGradientOpacity: 0,
-	};
-
-	const volumeChartConfig = {
-		...chartConfig,
-		backgroundColor: '#2D2D2D',
-		backgroundGradientFrom: '#2D2D2D',
-		backgroundGradientTo: '#3D3D3D',
-		color: (opacity = 1) => `rgba(255, 255, 255, ${opacity})`,
-		formatYLabel: (value: string) => {
-			const num = parseInt(value);
-			return formatValueWithSuffix(Math.abs(num)); // Showing absolute values on y-axis
-		},
-		propsForBackgroundLines: {
-			strokeDasharray: '',
-			stroke: 'rgba(255, 255, 255, 0.1)',
-		},
-		barPercentage: 0.8,
-		decimalPlaces: 0,
-	};
-
-	// Function to handle chart layout for proper dimensions
-	const onChartLayout = (event: any) => {
-		const { width, height } = event.nativeEvent.layout;
-		setChartDimensions({ width, height });
-	};
-
-	// Function to handle volume chart layout
-	const onVolumeChartLayout = (event: any) => {
-		const { width, height } = event.nativeEvent.layout;
-		setVolumeChartDimensions({ width, height });
+		useShadowColorFromDataset: true,
+		fillShadowGradient: CHART_COLORS.PRIMARY,
+		fillShadowGradientOpacity: 0.2,
 	};
 
 	// JSX for the chart section that can be reused in fullscreen mode
@@ -614,12 +643,21 @@ export default function ItemDetailScreen() {
 	) => (
 		<>
 			{isLoading ? (
-				<View style={[styles.chartLoadingContainer, { height }]}>
-					<ActivityIndicator size='small' color='#E6B800' />
+				<View
+					style={[
+						styles.chartLoadingContainer,
+						{ height, backgroundColor: CHART_COLORS.BACKGROUND_DARK },
+					]}
+				>
+					<ActivityIndicator size='small' color={CHART_COLORS.ACCENT} />
 				</View>
 			) : timeseriesData?.datasets?.[0]?.data?.length > 0 ? (
 				<View
-					style={{ width, height }}
+					style={{
+						width,
+						height,
+						backgroundColor: CHART_COLORS.BACKGROUND_DARK,
+					}}
 					onLayout={onChartLayout}
 					ref={chartAreaRef}
 					{...(enableDragging ? pricePanResponder.panHandlers : {})}
@@ -631,50 +669,18 @@ export default function ItemDetailScreen() {
 						chartConfig={chartConfig}
 						bezier
 						style={styles.chart}
-						withVerticalLines={false}
+						withVerticalLines={true}
 						withHorizontalLines={true}
 						withInnerLines={true}
 						withOuterLines={false}
 						withVerticalLabels={true}
 						withHorizontalLabels={true}
 						fromZero={false}
-						yAxisInterval={3}
-						withDots={true}
+						yAxisInterval={4}
+						withDots={false}
 						onDataPointClick={handleChartTouch}
 						segments={4}
-						renderDotContent={({ x, y, index }) => {
-							// Only show active tooltip
-							if (!tooltipPos.visible || index === undefined) return null;
-							if (
-								index !==
-								timeseriesData.datasets[0].data.findIndex(
-									(_, i) => i === tooltipPos.x
-								)
-							)
-								return null;
-
-							return (
-								<View
-									key={index}
-									style={[
-										styles.tooltipContainer,
-										{
-											left: x - 60,
-											top: y - 70,
-										},
-									]}
-								>
-									<Text style={styles.tooltipLabel}>{tooltipPos.label}</Text>
-									<Text style={[styles.tooltipValue, { color: '#E6B800' }]}>
-										High: {formatNumber(tooltipPos.highValue)}
-									</Text>
-									<Text style={[styles.tooltipValue, { color: '#64B4FF' }]}>
-										Low: {formatNumber(tooltipPos.lowValue)}
-									</Text>
-								</View>
-							);
-						}}
-						decorator={() => null}
+						hidePointsAtIndex={[]} // Hide all points
 					/>
 
 					{/* Draggable vertical line overlay */}
@@ -694,8 +700,8 @@ export default function ItemDetailScreen() {
 								x2={linePosition.x}
 								y2={height}
 								stroke='white'
-								strokeWidth={1}
-								strokeDasharray='5,5'
+								strokeWidth={0.5}
+								strokeDasharray='2,2'
 							/>
 							<SvgText
 								x={
@@ -705,7 +711,7 @@ export default function ItemDetailScreen() {
 								}
 								y={20}
 								fill='white'
-								fontSize='12'
+								fontSize='10'
 								fontWeight='bold'
 							>
 								{linePosition.priceData.date}
@@ -716,31 +722,23 @@ export default function ItemDetailScreen() {
 										? linePosition.x - 120
 										: linePosition.x + 10
 								}
-								y={40}
-								fill='#E6B800'
-								fontSize='12'
+								y={38}
+								fill={CHART_COLORS.PRIMARY}
+								fontSize='11'
 								fontWeight='bold'
 							>
-								High: {formatNumber(linePosition.priceData.high)}
-							</SvgText>
-							<SvgText
-								x={
-									linePosition.x > width / 2
-										? linePosition.x - 120
-										: linePosition.x + 10
-								}
-								y={60}
-								fill='#64B4FF'
-								fontSize='12'
-								fontWeight='bold'
-							>
-								Low: {formatNumber(linePosition.priceData.low)}
+								{formatNumber(linePosition.priceData.high)}
 							</SvgText>
 						</Svg>
 					)}
 				</View>
 			) : (
-				<View style={styles.noChartContainer}>
+				<View
+					style={[
+						styles.noChartContainer,
+						{ backgroundColor: CHART_COLORS.BACKGROUND_DARK },
+					]}
+				>
 					<Text style={styles.noChartText}>
 						No price history data available
 					</Text>
@@ -749,93 +747,11 @@ export default function ItemDetailScreen() {
 		</>
 	);
 
-	// Render volume chart as a bar chart with high/low volumes
-	const renderVolumeChart = (
-		width: number,
-		height: number,
-		enableDragging = true
-	) => (
-		<>
-			{isLoading ? (
-				<View style={styles.chartLoadingContainer}>
-					<ActivityIndicator size='small' color='#64B4FF' />
-				</View>
-			) : volumeChartData?.datasets?.[0]?.data?.length > 0 ? (
-				<View
-					style={{ width, height }}
-					onLayout={onVolumeChartLayout}
-					ref={volumeChartAreaRef}
-					{...(enableDragging ? volumePanResponder.panHandlers : {})}
-				>
-					<ChartKitBarChart
-						data={volumeChartData}
-						width={width}
-						height={height}
-						chartConfig={volumeChartConfig}
-						style={styles.chart}
-						withHorizontalLabels={true}
-						fromZero={false} // Set to false to allow negative values
-						showBarTops={false}
-						segments={4}
-						yAxisInterval={4}
-					/>
-
-					{/* Draggable vertical line overlay for volume chart */}
-					{linePosition.visible && (
-						<Svg
-							style={{
-								position: 'absolute',
-								top: 0,
-								left: 0,
-								width: width,
-								height: height,
-							}}
-						>
-							<Line
-								x1={linePosition.x}
-								y1={0}
-								x2={linePosition.x}
-								y2={height}
-								stroke='white'
-								strokeWidth={1}
-								strokeDasharray='5,5'
-							/>
-							<SvgText
-								x={
-									linePosition.x > width / 2
-										? linePosition.x - 120
-										: linePosition.x + 10
-								}
-								y={20}
-								fill={VOLUME_COLORS.HIGH}
-								fontSize='12'
-								fontWeight='bold'
-							>
-								High Vol: {formatNumber(linePosition.volumeData.high)}
-							</SvgText>
-							<SvgText
-								x={
-									linePosition.x > width / 2
-										? linePosition.x - 120
-										: linePosition.x + 10
-								}
-								y={40}
-								fill={VOLUME_COLORS.LOW}
-								fontSize='12'
-								fontWeight='bold'
-							>
-								Low Vol: {formatNumber(Math.abs(linePosition.volumeData.low))}
-							</SvgText>
-						</Svg>
-					)}
-				</View>
-			) : (
-				<View style={styles.noChartContainer}>
-					<Text style={styles.noChartText}>No volume data available</Text>
-				</View>
-			)}
-		</>
-	);
+	// Function to handle chart layout for proper dimensions
+	const onChartLayout = (event: any) => {
+		const { width, height } = event.nativeEvent.layout;
+		setChartDimensions({ width, height });
+	};
 
 	if (isLoading && !itemDetails) {
 		return (
@@ -869,10 +785,15 @@ export default function ItemDetailScreen() {
 	}
 
 	return (
-		<SafeAreaView style={styles.safeArea}>
-			<View style={styles.header}>
+		<SafeAreaView
+			style={[
+				styles.safeArea,
+				{ backgroundColor: CHART_COLORS.BACKGROUND_DARK },
+			]}
+		>
+			<View style={[styles.header, { borderBottomColor: CHART_COLORS.GRID }]}>
 				<TouchableOpacity style={styles.backButton} onPress={handleGoBack}>
-					<ArrowLeft size={24} color='#FFFFFF' />
+					<ArrowLeft size={24} color={CHART_COLORS.TEXT} />
 				</TouchableOpacity>
 				<Text style={styles.headerTitle} numberOfLines={1}>
 					{itemDetails?.name}
@@ -886,13 +807,18 @@ export default function ItemDetailScreen() {
 				>
 					<Heart
 						size={24}
-						color={isInWatchlist(itemId) ? '#FF4444' : '#E6B800'}
+						color={isInWatchlist(itemId) ? '#FF4444' : CHART_COLORS.ACCENT}
 						fill={isInWatchlist(itemId) ? '#FF4444' : 'transparent'}
 					/>
 				</TouchableOpacity>
 			</View>
 
-			<ScrollView style={styles.container}>
+			<ScrollView
+				style={[
+					styles.container,
+					{ backgroundColor: CHART_COLORS.BACKGROUND_DARK },
+				]}
+			>
 				<View style={styles.itemInfoContainer}>
 					<Image
 						source={{
@@ -939,20 +865,21 @@ export default function ItemDetailScreen() {
 						)}
 					</View>
 				</View>
+				{/* Display current price prominently */}
+				<View style={styles.priceHeader}>
+					<Text style={styles.priceLarge}>
+						{formatNumber(itemDetails?.price?.high || 0)}
+						<Text style={styles.priceUnitLarge}> gp</Text>
+					</Text>
+				</View>
 
-				<View style={styles.chartContainer}>
-					<View style={styles.chartHeaderContainer}>
-						<Text style={styles.chartTitle}>
-							<TrendingUp size={16} color='#E6B800' /> Price History
-						</Text>
-						<TouchableOpacity
-							style={styles.expandButton}
-							onPress={toggleFullscreenChart}
-						>
-							<Maximize2 size={18} color='#E6B800' />
-						</TouchableOpacity>
-					</View>
-
+				{/* Chart section - make it the main focus */}
+				<View
+					style={[
+						styles.chartContainer,
+						{ borderBottomColor: CHART_COLORS.GRID },
+					]}
+				>
 					<View style={styles.periodSelector}>
 						{TIME_PERIODS.map((period) => (
 							<TouchableOpacity
@@ -975,228 +902,11 @@ export default function ItemDetailScreen() {
 						))}
 					</View>
 
-					<View style={styles.chartLegend}>
-						<View style={styles.legendItem}>
-							<View
-								style={[styles.legendColor, { backgroundColor: '#E6B800' }]}
-							/>
-							<Text style={styles.legendText}>High Price</Text>
-						</View>
-						<View style={styles.legendItem}>
-							<View
-								style={[styles.legendColor, { backgroundColor: '#64B4FF' }]}
-							/>
-							<Text style={styles.legendText}>Low Price</Text>
-						</View>
-					</View>
-
 					<View style={styles.chartWrapper}>
-						{renderPriceChart(Dimensions.get('window').width - 32, 180)}
-						<Text style={styles.chartHint}>
-							Tap and drag on chart to see prices at different points
-						</Text>
-					</View>
-
-					<View style={styles.chartHeaderContainer}>
-						<Text style={styles.chartTitle}>
-							<BarChart size={16} color='#64B4FF' /> Volume History
-						</Text>
-						<TouchableOpacity
-							style={styles.expandButton}
-							onPress={toggleFullscreenVolumeChart}
-						>
-							<Maximize2 size={18} color='#64B4FF' />
-						</TouchableOpacity>
-					</View>
-
-					<View style={styles.chartLegend}>
-						<View style={styles.legendItem}>
-							<View
-								style={[
-									styles.legendColor,
-									{ backgroundColor: VOLUME_COLORS.HIGH },
-								]}
-							/>
-							<Text style={styles.legendText}>High Volume</Text>
-						</View>
-						<View style={styles.legendItem}>
-							<View
-								style={[
-									styles.legendColor,
-									{ backgroundColor: VOLUME_COLORS.LOW },
-								]}
-							/>
-							<Text style={styles.legendText}>Low Volume</Text>
-						</View>
-					</View>
-
-					<View style={styles.chartWrapper}>
-						{renderVolumeChart(Dimensions.get('window').width - 32, 150)}
-						<Text style={styles.chartHint}>
-							Tap and drag on chart to see volume at different points
-						</Text>
+						{renderPriceChart(Dimensions.get('window').width, 250)}
 					</View>
 				</View>
-
-				{itemDetails?.details?.examine && (
-					<View style={styles.examineContainer}>
-						<Text style={styles.examineLabel}>Item Description:</Text>
-						<Text style={styles.examineText}>
-							{itemDetails.details.examine}
-						</Text>
-					</View>
-				)}
 			</ScrollView>
-
-			{/* Fullscreen price chart modal */}
-			<Modal
-				visible={fullscreenChart}
-				animationType='slide'
-				transparent={false}
-				onRequestClose={() => setFullscreenChart(false)}
-			>
-				<SafeAreaView style={styles.fullscreenContainer}>
-					<View style={styles.fullscreenHeader}>
-						<TouchableOpacity
-							style={styles.fullscreenBackButton}
-							onPress={() => setFullscreenChart(false)}
-						>
-							<ArrowLeft size={24} color='#FFFFFF' />
-							<Text style={styles.fullscreenBackText}>Back</Text>
-						</TouchableOpacity>
-						<Text style={styles.fullscreenTitle}>
-							{itemDetails?.name} - Price
-						</Text>
-					</View>
-
-					<View style={styles.fullscreenPeriodSelector}>
-						{TIME_PERIODS.map((period) => (
-							<TouchableOpacity
-								key={period}
-								style={[
-									styles.periodButton,
-									selectedPeriod === period && styles.periodButtonActive,
-								]}
-								onPress={() => setSelectedPeriod(period)}
-							>
-								<Text
-									style={[
-										styles.periodButtonText,
-										selectedPeriod === period && styles.periodButtonTextActive,
-									]}
-								>
-									{period}
-								</Text>
-							</TouchableOpacity>
-						))}
-					</View>
-
-					<View style={styles.chartLegend}>
-						<View style={styles.legendItem}>
-							<View
-								style={[styles.legendColor, { backgroundColor: '#E6B800' }]}
-							/>
-							<Text style={styles.legendText}>High Price</Text>
-						</View>
-						<View style={styles.legendItem}>
-							<View
-								style={[styles.legendColor, { backgroundColor: '#64B4FF' }]}
-							/>
-							<Text style={styles.legendText}>Low Price</Text>
-						</View>
-					</View>
-
-					<Text style={styles.dragInstructionText}>
-						Touch and drag to compare prices
-					</Text>
-
-					<View style={styles.fullscreenChartContainer}>
-						{renderPriceChart(
-							Dimensions.get('window').width,
-							Dimensions.get('window').height - 220,
-							true
-						)}
-					</View>
-				</SafeAreaView>
-			</Modal>
-
-			{/* Fullscreen volume chart modal */}
-			<Modal
-				visible={fullscreenVolumeChart}
-				animationType='slide'
-				transparent={false}
-				onRequestClose={() => setFullscreenVolumeChart(false)}
-			>
-				<SafeAreaView style={styles.fullscreenContainer}>
-					<View style={styles.fullscreenHeader}>
-						<TouchableOpacity
-							style={styles.fullscreenBackButton}
-							onPress={() => setFullscreenVolumeChart(false)}
-						>
-							<ArrowLeft size={24} color='#FFFFFF' />
-							<Text style={styles.fullscreenBackText}>Back</Text>
-						</TouchableOpacity>
-						<Text style={styles.fullscreenTitle}>
-							{itemDetails?.name} - Volume
-						</Text>
-					</View>
-
-					<View style={styles.fullscreenPeriodSelector}>
-						{TIME_PERIODS.map((period) => (
-							<TouchableOpacity
-								key={period}
-								style={[
-									styles.periodButton,
-									selectedPeriod === period && styles.periodButtonActive,
-								]}
-								onPress={() => setSelectedPeriod(period)}
-							>
-								<Text
-									style={[
-										styles.periodButtonText,
-										selectedPeriod === period && styles.periodButtonTextActive,
-									]}
-								>
-									{period}
-								</Text>
-							</TouchableOpacity>
-						))}
-					</View>
-
-					<View style={styles.chartLegend}>
-						<View style={styles.legendItem}>
-							<View
-								style={[
-									styles.legendColor,
-									{ backgroundColor: VOLUME_COLORS.HIGH },
-								]}
-							/>
-							<Text style={styles.legendText}>High Volume</Text>
-						</View>
-						<View style={styles.legendItem}>
-							<View
-								style={[
-									styles.legendColor,
-									{ backgroundColor: VOLUME_COLORS.LOW },
-								]}
-							/>
-							<Text style={styles.legendText}>Low Volume</Text>
-						</View>
-					</View>
-
-					<Text style={styles.dragInstructionText}>
-						Touch and drag to compare volumes
-					</Text>
-
-					<View style={styles.fullscreenChartContainer}>
-						{renderVolumeChart(
-							Dimensions.get('window').width,
-							Dimensions.get('window').height - 220,
-							true
-						)}
-					</View>
-				</SafeAreaView>
-			</Modal>
 		</SafeAreaView>
 	);
 }
@@ -1355,65 +1065,25 @@ const styles = StyleSheet.create({
 		fontWeight: 'bold',
 	},
 	chartContainer: {
-		padding: 16,
+		padding: 0,
 		borderBottomWidth: 1,
-		borderBottomColor: '#2D2D2D',
-	},
-	chartHeaderContainer: {
-		flexDirection: 'row',
-		justifyContent: 'space-between',
-		alignItems: 'center',
-		marginBottom: 16,
-	},
-	chartTitle: {
-		color: '#FFFFFF',
-		fontSize: 16,
-		fontWeight: 'bold',
-	},
-	expandButton: {
-		padding: 4,
-		backgroundColor: '#3D3D3D',
-		borderRadius: 4,
+		borderBottomColor: CHART_COLORS.GRID,
 	},
 	periodSelector: {
 		flexDirection: 'row',
-		backgroundColor: '#2D2D2D',
-		borderRadius: 8,
-		overflow: 'hidden',
-		marginBottom: 16,
-	},
-	chartLegend: {
-		flexDirection: 'row',
-		marginBottom: 8,
-		justifyContent: 'center',
-	},
-	legendItem: {
-		flexDirection: 'row',
-		alignItems: 'center',
-		marginHorizontal: 8,
-	},
-	legendColor: {
-		width: 12,
-		height: 12,
-		borderRadius: 6,
-		marginRight: 4,
-	},
-	legendText: {
-		color: '#FFFFFF',
-		fontSize: 12,
-	},
-	chartWrapper: {
-		marginBottom: 16,
+		backgroundColor: CHART_COLORS.BACKGROUND_DARK,
+		marginVertical: 8,
+		paddingHorizontal: 8,
+		justifyContent: 'space-between',
 	},
 	periodButton: {
 		paddingHorizontal: 8,
 		paddingVertical: 6,
-		backgroundColor: '#2D2D2D',
-		flex: 1,
-		alignItems: 'center',
+		backgroundColor: CHART_COLORS.BACKGROUND_DARK,
+		borderRadius: 4,
 	},
 	periodButtonActive: {
-		backgroundColor: '#3D3D3D',
+		backgroundColor: '#333',
 	},
 	periodButtonText: {
 		color: '#8F8F8F',
@@ -1421,103 +1091,50 @@ const styles = StyleSheet.create({
 		fontWeight: 'bold',
 	},
 	periodButtonTextActive: {
-		color: '#E6B800',
+		color: CHART_COLORS.TEXT,
 	},
 	chart: {
-		borderRadius: 8,
-		marginBottom: 8,
+		borderRadius: 0,
 	},
-	chartHint: {
-		color: '#8F8F8F',
-		fontSize: 12,
-		textAlign: 'center',
-		marginBottom: 16,
+	chartWrapper: {
+		marginBottom: 0,
 	},
 	chartLoadingContainer: {
-		height: 180,
+		height: 250,
 		justifyContent: 'center',
 		alignItems: 'center',
+	},
+	priceHeader: {
+		alignItems: 'center',
+		padding: 16,
+		borderBottomWidth: 1,
+		borderBottomColor: CHART_COLORS.GRID,
+	},
+	priceLarge: {
+		color: CHART_COLORS.TEXT,
+		fontSize: 32,
+		fontWeight: 'bold',
+	},
+	priceUnitLarge: {
+		color: CHART_COLORS.TEXT,
+		fontSize: 20,
+		fontWeight: 'normal',
 	},
 	noChartContainer: {
 		padding: 16,
 		alignItems: 'center',
 		justifyContent: 'center',
-		height: 120,
-		backgroundColor: '#2D2D2D',
-		borderRadius: 8,
-		marginBottom: 16,
-	},
-	noChartText: {
-		color: '#8F8F8F',
-		fontSize: 16,
+		height: 250,
+		backgroundColor: CHART_COLORS.BACKGROUND_DARK,
+		borderRadius: 0,
+		marginBottom: 0,
 	},
 	tooltipContainer: {
-		backgroundColor: 'rgba(50, 50, 50, 0.95)',
-		borderRadius: 8,
+		backgroundColor: CHART_COLORS.TOOLTIP_BG,
+		borderRadius: 4,
 		padding: 8,
 		width: 120,
 		position: 'absolute',
 		zIndex: 99,
-	},
-	tooltipLabel: {
-		color: '#FFFFFF',
-		fontSize: 10,
-		marginBottom: 4,
-	},
-	tooltipValue: {
-		fontSize: 12,
-		fontWeight: 'bold',
-	},
-	examineContainer: {
-		padding: 16,
-	},
-	examineLabel: {
-		color: '#FFFFFF',
-		fontSize: 16,
-		fontWeight: 'bold',
-		marginBottom: 8,
-	},
-	examineText: {
-		color: '#CCCCCC',
-		fontSize: 14,
-		lineHeight: 20,
-	},
-	fullscreenContainer: {
-		flex: 1,
-		backgroundColor: '#1A1A1A',
-		padding: 16,
-	},
-	fullscreenHeader: {
-		flexDirection: 'row',
-		alignItems: 'center',
-		marginBottom: 16,
-	},
-	fullscreenBackButton: {
-		flexDirection: 'row',
-		alignItems: 'center',
-	},
-	fullscreenBackText: {
-		color: '#FFFFFF',
-		marginLeft: 4,
-	},
-	fullscreenTitle: {
-		color: '#FFFFFF',
-		fontSize: 18,
-		fontWeight: 'bold',
-		flex: 1,
-		textAlign: 'center',
-		marginRight: 32, // Balance with back button
-	},
-	fullscreenPeriodSelector: {
-		flexDirection: 'row',
-		backgroundColor: '#2D2D2D',
-		borderRadius: 8,
-		overflow: 'hidden',
-		marginBottom: 16,
-	},
-	fullscreenChartContainer: {
-		flex: 1,
-		justifyContent: 'center',
-		alignItems: 'center',
 	},
 });
